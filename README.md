@@ -1,4 +1,4 @@
-# Tax Machine Learning — Peer-Group Anomaly Review
+# Tax Insight — Peer-Group Tax Anomaly Review
 
 Unsupervised detection of unusual individual tax returns, explained with SHAP
 and served through a local review dashboard.
@@ -23,7 +23,7 @@ confidential and is not, and must never be, committed to this repository.
 
 | Path | Purpose |
 |---|---|
-| `app.py` | Streamlit dashboard: enter or load a record, see the verdict, score gauge, peer percentile, SHAP drivers, ATO guidance and a review assistant |
+| `app.py` | Streamlit dashboard (Tax Insight): Overview with score card, peer-group context, driving factors, evidence checklist, ATO guidance and a docked review assistant; Record entry form; Guidance and About pages; Markdown report export |
 | `anomaly_service.py` | Loads the fitted pipeline and scores one record: peer group → anomaly score → threshold → SHAP drivers and protective factors |
 | `record_builder.py` | Turns the dashboard's plain-language fields (salary, work-related expenses, rental income and deductions, …) into the itemised ATO record the model expects, deriving total income, total deductions and taxable income |
 | `research_agent.py` | Deterministic retrieval over `ato_knowledge_base.json`; writes the review narrative and answers questions without calling an external model |
@@ -43,10 +43,14 @@ pip install -r requirements.txt
 python -m streamlit run app.py
 ```
 
-Open the address Streamlit prints (usually <http://localhost:8501>). Load one
-of the example scenarios in the sidebar — typical wage earner, inflated
-work-related claims, negatively geared investor, sole trader, retiree — and
-select **Analyse taxpayer**.
+Open the address Streamlit prints (usually <http://localhost:8501>). On the
+**Record entry** page enter a return in plain-language fields (salary and
+work-related expenses, rental income and deductions, business income and
+expenses, investment income and deductions, other items) or load an example
+scenario, then select **Analyse taxpayer**. The **Overview** shows the anomaly
+score against the peer-group threshold, the factors driving it, suggested
+evidence checks, linked ATO guidance and a review assistant. A scenario can
+also be opened directly, e.g. `?scenario=Stacked+deductions+on+a+wage`.
 
 Run the tests with:
 
