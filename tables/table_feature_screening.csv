@@ -18,7 +18,7 @@ Net_NPP_BI_amt,10.17,kept
 Total_PP_BI_amt,0.43,dropped: sparse
 Total_NPP_BI_amt,9.92,kept
 Total_PP_BE_amt,0.44,dropped: sparse
-Total_NPP_BE_amt,9.25,dropped: redundant
+Total_NPP_BE_amt,9.24,dropped: redundant
 Net_CG_amt,6.96,kept
 Tot_CY_CG_amt,9.11,kept
 Net_PT_PP_dsn,1.32,kept
@@ -28,18 +28,18 @@ Untaxed_othr_pnsn_amt,1.27,kept
 Other_foreign_inc_amt,6.59,kept
 Other_inc_amt,8.85,kept
 Tot_IncLoss_amt,98.97,kept
-WRE_car_amt,23.47,kept
-WRE_trvl_amt,9.77,kept
+WRE_car_amt,23.34,kept
+WRE_trvl_amt,9.59,kept
 WRE_uniform_amt,43.11,kept
 WRE_self_amt,5.69,kept
-WRE_other_amt,54.89,kept
-Div_Ded_amt,2.38,kept
-Intrst_Ded_amt,1.08,kept
+WRE_other_amt,54.85,kept
+Div_Ded_amt,2.18,kept
+Intrst_Ded_amt,0.88,dropped: sparse
 Gift_amt,27.69,kept
 Non_emp_spr_amt,4.18,kept
 Cost_tax_affairs_amt,39.03,kept
 Other_Ded_amt,5.8,kept
-Tot_ded_amt,76.1,kept
+Tot_ded_amt,76.06,kept
 PP_loss_claimed,0.13,dropped: sparse
 NPP_loss_claimed,0.42,dropped: sparse
 Rep_frng_ben_amt,6.63,kept
@@ -50,7 +50,7 @@ Cr_PAYG_ITI_amt,9.07,kept
 TFN_amts_wheld_gr_intst_amt,9.37,kept
 TFN_amts_wheld_divs_amt,0.58,dropped: sparse
 Hrs_to_prepare_BPI_cnt,0.63,dropped: sparse
-Taxable_Income,97.69,kept
+Taxable_Income,97.93,kept
 Help_debt,14.99,kept
 Spr_Emplr_Contr,76.55,kept
 Spr_Prsnl_Contr,10.72,kept

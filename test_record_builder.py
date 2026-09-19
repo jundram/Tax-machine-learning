@@ -30,10 +30,12 @@ class RecordBuilderTests(unittest.TestCase):
 
     def test_combined_fields_are_spread_across_itemised_columns(self):
         record = build_record({"work_related_expenses": 10_000, "rental_deductions": 1_000}, FALLBACK_SPLITS)
-        wre_columns = ["WRE_car_amt", "WRE_trvl_amt", "WRE_uniform_amt", "WRE_self_amt", "WRE_other_amt"]
+        wre_columns = list(FALLBACK_SPLITS["work_related_expenses"])
         self.assertAlmostEqual(sum(record[c] for c in wre_columns), 10_000)
         self.assertTrue(all(record[c] > 0 for c in wre_columns))
-        rent_columns = ["Rent_int_ded_amt", "Other_rent_ded_amt", "Rent_cap_wks_amt"]
+        # Minority lines (self-education, travel) are left untouched so no rare item is manufactured.
+        self.assertNotIn("WRE_self_amt", record)
+        rent_columns = list(FALLBACK_SPLITS["rental_deductions"])
         self.assertAlmostEqual(sum(record[c] for c in rent_columns), 1_000)
 
     def test_franking_credit_attached_to_franked_dividends(self):

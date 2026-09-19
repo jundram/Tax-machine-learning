@@ -1,4 +1,4 @@
-# Tax Insight — Peer-Group Tax Anomaly Review
+# TaxLens — Peer-Group Tax Anomaly Review
 
 Unsupervised detection of unusual individual tax returns, explained with SHAP
 and served through a local review dashboard.
@@ -11,8 +11,10 @@ Local **SHAP** values explain each score, and a small rule-based research agent
 links the strongest drivers to official ATO guidance and reviewer questions.
 
 The fitted artifacts in `models/` were trained on the **ATO 2022–23 individual
-sample file** (a 2 % sample of individual returns). The data file itself is
-confidential and is not, and must never be, committed to this repository.
+sample file** (a 2 % sample of individual returns) exactly as supplied: no
+record was modified and no synthetic anomalies were injected, so every
+evaluation is label-free. The data file itself is confidential and is not, and
+must never be, committed to this repository.
 
 > **Interpretive rule.** An anomaly flag is a statistical signal that a return
 > is unusual relative to its peer group. It is not evidence of non-compliance or
@@ -23,11 +25,11 @@ confidential and is not, and must never be, committed to this repository.
 
 | Path | Purpose |
 |---|---|
-| `app.py` | Streamlit dashboard (Tax Insight): Overview with score card, peer-group context, driving factors, evidence checklist, ATO guidance and a docked review assistant; Record entry form; Guidance and About pages; Markdown report export |
+| `app.py` | Streamlit dashboard (TaxLens): Overview with score card, peer-group context, driving factors and a docked review assistant; Record entry form; Guidance page; About page presenting the model and its label-free evaluation |
 | `anomaly_service.py` | Loads the fitted pipeline and scores one record: peer group → anomaly score → threshold → SHAP drivers and protective factors |
 | `record_builder.py` | Turns the dashboard's plain-language fields (salary, work-related expenses, rental income and deductions, …) into the itemised ATO record the model expects, deriving total income, total deductions and taxable income |
 | `research_agent.py` | Deterministic retrieval over `ato_knowledge_base.json`; writes the review narrative and answers questions without calling an external model |
-| `taxpayer_framework.py` | The full research pipeline (segmentation, model selection, contamination sweep, supervised comparison, SHAP) that produced the artifacts |
+| `taxpayer_framework.py` | The full research pipeline (segmentation, model selection, contamination sweep, label-free validation, surrogate models, SHAP) that produced the artifacts |
 | `tools/export_segment_profiles.py` | Summarises the row-level results into aggregate per-segment statistics (`segment_profiles.json`) and population-typical itemisation proportions (`input_splits.json`) for the dashboard |
 | `models/` | Fitted scalers, K-Means, per-segment Isolation Forests, `model_metadata.json`, `segment_profiles.json`, `input_splits.json` |
 | `figures/`, `tables/`, `results/summary_public.json` | Aggregate outputs of the training run (see *Data confidentiality*) |
@@ -98,9 +100,15 @@ before committing.
 | Stage | Method |
 |---|---|
 | 1 · Segmentation | K-Means on seven income-composition shares plus log gross activity and log super balance; *k* chosen by silhouette subject to a minimum segment size |
-| 2 · Anomaly detection | One Isolation Forest per segment (200 trees) on 35 log-amount and behavioural-ratio features; 2 % review budget per segment |
-| 3 · Supervised comparison | Random Forest and Histogram Gradient Boosting trained on documented injected perturbations, used only to benchmark the unsupervised design |
+| 2 · Anomaly detection | One Isolation Forest per segment (200 trees) on log-amount and behavioural-ratio features; 2 % review budget per segment, compared with a population-wide forest |
+| 3 · Surrogate models | Random Forest and Histogram Gradient Boosting trained to reproduce the Isolation Forest flag, to measure how consistent and learnable the rule is |
 | 4 · Explainability | `shap.TreeExplainer` on each segment's forest for local drivers; surrogate model for segment membership |
+
+Label-free validation replaces injected-anomaly metrics: agreement between the
+segmented and population-wide designs at every budget, flag rates by peer
+group and income decile, a ratios-only feature-space ablation, score stability
+across five Isolation Forest seeds, and rule-based sanity checks on flagged
+rows. The **About** page of the dashboard presents these numbers.
 
 Developed as a Master of Data Science capstone project. The scikit-learn
 version is pinned in `requirements.txt` because the pickled artifacts are

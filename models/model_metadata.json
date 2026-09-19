@@ -43,7 +43,6 @@
     "log_WRE_self_amt",
     "log_WRE_other_amt",
     "log_Div_Ded_amt",
-    "log_Intrst_Ded_amt",
     "log_Gift_amt",
     "log_Non_emp_spr_amt",
     "log_Cost_tax_affairs_amt",
@@ -115,7 +114,6 @@
     "WRE_self_amt",
     "WRE_other_amt",
     "Div_Ded_amt",
-    "Intrst_Ded_amt",
     "Gift_amt",
     "Non_emp_spr_amt",
     "Cost_tax_affairs_amt",
@@ -203,14 +201,14 @@
     "7": "S7: No/minimal reported income"
   },
   "segment_thresholds": {
-    "0": 0.5331831550455164,
-    "1": 0.5294304775295803,
-    "2": 0.5425071053013495,
-    "3": 0.5448793622173238,
-    "4": 0.5285978824452058,
-    "5": 0.5262928995821501,
-    "6": 0.5233993845582631,
-    "7": 0.5393516804979271
+    "0": 0.5399666036830487,
+    "1": 0.5376592302808912,
+    "2": 0.5494229501900738,
+    "3": 0.5459966855234112,
+    "4": 0.5295473423271942,
+    "5": 0.5239753097592207,
+    "6": 0.526145052690402,
+    "7": 0.5497492166695722
   },
   "required_input_columns": [
     "Ind",

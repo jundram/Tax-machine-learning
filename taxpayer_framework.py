@@ -2,38 +2,51 @@
 taxpayer_framework.py
 =====================
 Taxpayer Classification and Tax Anomaly Detection Using Unsupervised Machine
-Learning with SHAP-Based Explainability.
+Learning with SHAP-Based Explainability -- real data only.
+
+No record is modified and no synthetic anomaly label exists, so every
+evaluation is label-free. The fitted pipeline is exported to models/ for the
+Tax Insight dashboard (anomaly_service.py).
 
 Four-stage framework
     Stage 1  Taxpayer segmentation (K-Means on an income-composition space)
     Stage 2  Peer-group Isolation Forest (one forest per segment), compared
              with a population-wide Isolation Forest
-    Stage 3  Supervised anomaly classification (Random Forest and Histogram
-             Gradient Boosting) trained on INJECTED synthetic anomaly labels
+    Stage 3  Supervised SURROGATE of the anomaly rule: Random Forest and
+             Histogram Gradient Boosting trained to reproduce the Isolation
+             Forest flag (how learnable / consistent is the rule?)
     Stage 4  SHAP explainability (surrogate model for the segmentation,
              TreeExplainer for the Isolation Forests and the Random Forest)
+
+Label-free evaluation replaces the injected-label metrics:
+    - segmented vs population-wide overlap (Jaccard) at every review budget
+    - flag rate by income decile and by segment (income confounding)
+    - feature-space ablation (amounts + ratios vs ratios only)
+    - score stability across five Isolation Forest seeds
+    - rule-based sanity checks on flagged rows
 
 Data
     If ../data/2023_sample_file_SA4.csv (the ATO 2022-23 individual sample
     file) is present it is used.  Otherwise a schema-matched synthetic dataset
     is generated so the script runs end-to-end without any external file.
 
-The injected anomaly labels are SYNTHETIC.  They are not real audit outcomes
-and nothing in this script identifies fraud or non-compliance.
+Nothing in this script identifies fraud or non-compliance: an anomaly flag is
+a statistical signal relative to a peer group.
 
 Run:  python taxpayer_framework.py
+Outputs go to figures/, tables/, results/ and models/.
 """
 
 # ============================================================================
 # 1. IMPORT LIBRARIES
 # ============================================================================
 import json
+import joblib
 import sys
 import time
 import warnings
 from pathlib import Path
 
-import joblib
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -71,6 +84,7 @@ RNG = np.random.default_rng(SEED)
 
 ROOT = Path(__file__).resolve().parent
 DATA_PATH = ROOT.parent / "data" / "2023_sample_file_SA4.csv"
+RUN_TAG = "real_only"
 FIG = ROOT / "figures"
 RES = ROOT / "results"
 TAB = ROOT / "tables"
@@ -78,7 +92,9 @@ MODEL_DIR = ROOT / "models"
 for d in (FIG, RES, TAB, MODEL_DIR):
     d.mkdir(parents=True, exist_ok=True)
 
-INJECT_RATE = 0.01                    # share of records perturbed (synthetic anomalies)
+INJECT_RATE = 0.0                     # real data only: no synthetic anomalies
+STABILITY_SEEDS = [42, 1, 2, 3, 4]    # Isolation Forest seeds for the stability check
+RARE_ITEM_PCT = 0.05                  # an item claimed by < 5% of a segment counts as "rare"
 CONTAMINATION_GRID = [0.01, 0.02, 0.05, 0.10]
 CONTAMINATION = 0.02                  # operating point
 K_RANGE = list(range(3, 11))
@@ -231,119 +247,15 @@ SUMMARY["n_records"] = int(len(raw))
 SUMMARY["n_columns"] = int(raw.shape[1])
 
 # ============================================================================
-# 4. INJECT SYNTHETIC ANOMALIES (in place, documented, labelled)
+# 4. (NO SYNTHETIC ANOMALIES) -- real records only
 # ============================================================================
-section("SECTION 4 - INJECT SYNTHETIC ANOMALIES")
+section("SECTION 4 - REAL DATA ONLY: NO SYNTHETIC ANOMALY INJECTION")
 df = raw.copy()
-df["injected"] = 0
+df["injected"] = 0                    # kept so that downstream column lists still resolve
 df["injected_type"] = "none"
-original = raw.copy()   # kept for the before/after audit table
-
-
-def recompute_identities(d, idx):
-    """Re-apply the two exact accounting identities that hold in the ATO file."""
-    d.loc[idx, "Tot_ded_amt"] = d.loc[idx, DEDUCTION_COMPONENTS].sum(axis=1)
-    base = d.loc[idx, "Tot_IncLoss_amt"] - d.loc[idx, "Tot_ded_amt"] - d.loc[idx, LOSS_COLS].sum(axis=1)
-    d.loc[idx, "Taxable_Income"] = base.clip(lower=0)
-
-
-def inj_wre_inflation(d, idx, rng):
-    """A1: work-related expenses raised to 25-45% of salary (peer 99th pct ~ 24%)."""
-    target = rng.uniform(0.25, 0.45, len(idx)) * d.loc[idx, "Sw_amt"]
-    add = (target - d.loc[idx, WRE_COLS].sum(axis=1)).clip(lower=0)
-    d.loc[idx, "WRE_other_amt"] += np.round(add * 0.5)
-    d.loc[idx, "WRE_car_amt"] += np.round(add * 0.3)
-    d.loc[idx, "WRE_trvl_amt"] += np.round(add * 0.2)
-    recompute_identities(d, idx)
-
-
-def inj_business_expense_inflation(d, idx, rng):
-    """A2: business expenses raised to 150-300% of business income (peer 99th pct ~ 220%)."""
-    new_be = np.maximum(d.loc[idx, "Total_NPP_BE_amt"],
-                        np.round(rng.uniform(1.5, 3.0, len(idx)) * d.loc[idx, "Total_NPP_BI_amt"]))
-    delta = new_be - d.loc[idx, "Total_NPP_BE_amt"]
-    d.loc[idx, "Total_NPP_BE_amt"] = new_be
-    d.loc[idx, "Net_NPP_BI_amt"] -= delta
-    d.loc[idx, "Tot_IncLoss_amt"] -= delta
-    recompute_identities(d, idx)
-
-
-def inj_rental_deduction_inflation(d, idx, rng):
-    """A3: rental deductions raised to 300-500% of gross rent (peer 99th pct ~ 295%)."""
-    cur = d.loc[idx, RENT_DED_COLS].sum(axis=1)
-    new_total = np.round(rng.uniform(3.0, 5.0, len(idx)) * d.loc[idx, "Gross_rent_amt"])
-    delta = (new_total - cur).clip(lower=0)
-    share = d.loc[idx, RENT_DED_COLS].div(cur.replace(0, np.nan), axis=0)
-    share = share.fillna(0)
-    share.loc[cur == 0, "Rent_int_ded_amt"] = 1.0
-    for c in RENT_DED_COLS:
-        d.loc[idx, c] += np.round(delta * share[c])
-    d.loc[idx, "Net_rent_amt"] -= delta
-    d.loc[idx, "Tot_IncLoss_amt"] -= delta
-    recompute_identities(d, idx)
-
-
-def inj_taxable_income_violation(d, idx, rng):
-    """A4: taxable income set to 40-70% of (income - deductions - losses); identity broken."""
-    base = d.loc[idx, "Tot_IncLoss_amt"] - d.loc[idx, "Tot_ded_amt"] - d.loc[idx, LOSS_COLS].sum(axis=1)
-    d.loc[idx, "Taxable_Income"] = np.round(rng.uniform(0.4, 0.7, len(idx)) * base)
-
-
-def inj_investment_deduction_no_income(d, idx, rng):
-    """A5: interest/dividend deductions of 15-35% of income with no investment income reported."""
-    inc = d.loc[idx, "Tot_IncLoss_amt"]
-    d.loc[idx, "Intrst_Ded_amt"] = np.round(rng.uniform(0.15, 0.35, len(idx)) * inc)
-    d.loc[idx, "Div_Ded_amt"] = np.round(rng.uniform(0.0, 0.05, len(idx)) * inc)
-    recompute_identities(d, idx)
-
-
-inv_income = df[["Grs_int_amt", "Unfranked_Div_amt", "Frk_Div_amt"]].sum(axis=1)
-rent_ded = df[RENT_DED_COLS].sum(axis=1)
-base_ti = df["Tot_IncLoss_amt"] - df["Tot_ded_amt"] - df[LOSS_COLS].sum(axis=1)
-ANOMALY_TYPES = [
-    ("A1_wre_inflation", "Work-related expenses inflated to 25-45% of salary",
-     df["Sw_amt"] > 20000, inj_wre_inflation),
-    ("A2_business_expense", "Business expenses inflated to 150-300% of business income",
-     (df["Total_NPP_BI_amt"] > 5000) & (df["Total_NPP_BE_amt"] < df["Total_NPP_BI_amt"]), inj_business_expense_inflation),
-    ("A3_rental_deduction", "Rental deductions inflated to 300-500% of gross rent",
-     (df["Gross_rent_amt"] > 5000) & (rent_ded < 1.5 * df["Gross_rent_amt"]), inj_rental_deduction_inflation),
-    ("A4_taxable_identity", "Taxable income reported at 40-70% of income less deductions and losses",
-     (df["Tot_IncLoss_amt"] > 30000) & (base_ti > 20000), inj_taxable_income_violation),
-    ("A5_invest_ded_no_income", "Investment deductions of 15-35% of income with zero investment income",
-     (inv_income == 0) & (df["Tot_IncLoss_amt"] > 30000) & (df["Intrst_Ded_amt"] == 0) & (df["Div_Ded_amt"] == 0),
-     inj_investment_deduction_no_income),
-]
-n_target = int(round(INJECT_RATE * len(df)))
-per_type = [n_target // 5 + (1 if i < n_target % 5 else 0) for i in range(5)]
-used = np.zeros(len(df), dtype=bool)
-inject_rows = []
-for (name, desc, elig, fn), k in zip(ANOMALY_TYPES, per_type):
-    pool = np.flatnonzero(elig.values & ~used)
-    chosen = RNG.choice(pool, size=min(k, len(pool)), replace=False)
-    used[chosen] = True
-    idx = df.index[chosen]
-    fn(df, idx, RNG)
-    df.loc[idx, "injected"] = 1
-    df.loc[idx, "injected_type"] = name
-    inject_rows.append({"type": name, "description": desc, "eligible_pool": int(len(pool)), "n_injected": int(len(chosen))})
-    log(f"  {name:26s} eligible={len(pool):>7,}  injected={len(chosen):>5,}  | {desc}")
-inject_table = pd.DataFrame(inject_rows)
-savetab(inject_table, "table_injection_design.csv", index=False)
-SUMMARY["n_injected"] = int(df["injected"].sum())
-SUMMARY["injected_pct"] = round(100 * df["injected"].mean(), 3)
-log(f"Total injected: {SUMMARY['n_injected']:,} ({SUMMARY['injected_pct']}%)")
-
-# before/after audit of the injection (median ratio among modified records)
-aud = []
-for name, *_ in ANOMALY_TYPES:
-    m = df["injected_type"] == name
-    o, n_ = original[m], df[m]
-    r = {"type": name}
-    r["ded_to_income_before"] = (o["Tot_ded_amt"] / o["Tot_IncLoss_amt"].clip(lower=1)).median()
-    r["ded_to_income_after"] = (n_["Tot_ded_amt"] / n_["Tot_IncLoss_amt"].clip(lower=1)).median()
-    r["taxable_before"] = o["Taxable_Income"].median(); r["taxable_after"] = n_["Taxable_Income"].median()
-    aud.append(r)
-savetab(pd.DataFrame(aud).round(3), "table_injection_audit.csv", index=False)
+log("No records were modified.  Every evaluation below is label-free.")
+SUMMARY["n_injected"] = 0
+SUMMARY["injected_pct"] = 0.0
 
 # ============================================================================
 # 5. EXPLORE THE DATASET
@@ -678,28 +590,18 @@ for c in CONTAMINATION_GRID:
 df["flag_glob"] = df[f"flag_glob_{int(CONTAMINATION * 100)}pct"]
 log(f"Global forest fitted in {time.time() - t:.1f}s; flagged {int(df['flag_glob'].sum()):,}")
 
-y_inj = df["injected"].values
+# label-free contamination sweep: how much do the two designs agree at each review budget?
 comp_rows = []
 for c in CONTAMINATION_GRID:
-    for design in ["seg", "glob"]:
-        f = df[f"flag_{design}_{int(c * 100)}pct"].values
-        comp_rows.append({"contamination": c, "design": "segmented" if design == "seg" else "population-wide",
-                          "n_flagged": int(f.sum()), "injected_recall": recall_score(y_inj, f),
-                          "injected_precision": precision_score(y_inj, f), "injected_f1": f1_score(y_inj, f),
-                          "natural_flags": int(((f == 1) & (y_inj == 0)).sum())})
+    fs = df[f"flag_seg_{int(c * 100)}pct"].values == 1
+    fg = df[f"flag_glob_{int(c * 100)}pct"].values == 1
+    both_c, union_c = int((fs & fg).sum()), int((fs | fg).sum())
+    comp_rows.append({"contamination": c, "n_flagged_segmented": int(fs.sum()), "n_flagged_population_wide": int(fg.sum()),
+                      "flagged_by_both": both_c, "jaccard": both_c / union_c,
+                      "pct_segmented_list_changed": 100 * (1 - both_c / max(fs.sum(), 1))})
 sweep = pd.DataFrame(comp_rows).round(4)
 savetab(sweep, "table_contamination_sweep.csv", index=False)
 log(sweep.to_string(index=False))
-
-# recall by injected type at the operating point
-type_rows = []
-for name, desc, *_ in ANOMALY_TYPES:
-    m = df["injected_type"] == name
-    type_rows.append({"type": name, "n": int(m.sum()), "recall_segmented": df.loc[m, "flag_seg"].mean(),
-                      "recall_population_wide": df.loc[m, "flag_glob"].mean()})
-type_recall = pd.DataFrame(type_rows).round(4)
-savetab(type_recall, "table_recall_by_anomaly_type.csv", index=False)
-log(type_recall.to_string(index=False))
 
 # overlap and income confounding
 both = int(((df["flag_seg"] == 1) & (df["flag_glob"] == 1)).sum())
@@ -719,23 +621,22 @@ savetab(confound, "table_income_confounding.csv", index=False)
 log(confound.to_string(index=False))
 log(f"Flagged by both designs: {both:,}  Jaccard={both / union:.4f}  Spearman(scores)={rho_designs:.4f}")
 SUMMARY.update({"flag_overlap_both": both, "flag_jaccard": round(both / union, 4), "score_spearman_seg_vs_glob": round(rho_designs, 4),
-                "contamination_sweep": sweep.to_dict("records"), "recall_by_type": type_recall.to_dict("records"),
-                "income_confounding": confound.to_dict("records")})
+                "contamination_sweep": sweep.to_dict("records"), "income_confounding": confound.to_dict("records")})
 
 # flag rate by segment for each design
 seg_rate = df.groupby("segment_name").agg(n=("flag_seg", "size"), flagged_segmented=("flag_seg", "sum"),
-                                          flagged_population_wide=("flag_glob", "sum"), injected=("injected", "sum"))
+                                          flagged_population_wide=("flag_glob", "sum"))
 seg_rate["rate_segmented_pct"] = (100 * seg_rate["flagged_segmented"] / seg_rate["n"]).round(2)
 seg_rate["rate_population_wide_pct"] = (100 * seg_rate["flagged_population_wide"] / seg_rate["n"]).round(2)
-seg_rate["injected_rate_pct"] = (100 * seg_rate["injected"] / seg_rate["n"]).round(2)
 savetab(seg_rate, "table_flag_rate_by_segment.csv")
 log(seg_rate.to_string())
 SUMMARY["flag_rate_by_segment"] = seg_rate.reset_index().to_dict("records")
 
 fig, axes = plt.subplots(1, 3, figsize=(15, 4.2))
-sw = sweep.pivot(index="contamination", columns="design", values="injected_recall")[["segmented", "population-wide"]]
-sw.plot(kind="bar", ax=axes[0], color=[PALETTE[0], PALETTE[1]]); axes[0].set_title("Recall of injected anomalies vs review budget")
-axes[0].set_xlabel("contamination (review budget)"); axes[0].set_ylabel("recall"); axes[0].set_xticklabels([f"{int(c * 100)}%" for c in sw.index], rotation=0)
+sw = sweep.set_index("contamination")["jaccard"]
+sw.plot(kind="bar", ax=axes[0], color=PALETTE[0]); axes[0].set_title("Agreement of the two designs (Jaccard) vs review budget")
+axes[0].set_xlabel("contamination (review budget)"); axes[0].set_ylabel("Jaccard of flag sets"); axes[0].set_xticklabels([f"{int(c * 100)}%" for c in sw.index], rotation=0)
+axes[0].set_ylim(0, 1)
 dec = df.groupby("income_decile")[["flag_seg", "flag_glob"]].mean() * 100
 dec.columns = ["segmented", "population-wide"]
 dec.plot(kind="bar", ax=axes[1], color=[PALETTE[0], PALETTE[1]]); axes[1].set_title("Flag rate by income decile (2% budget)")
@@ -775,32 +676,116 @@ for space_name, Xspace in [("amounts + ratios (primary)", X_ad), ("ratios only",
             df[f"flag_ratio_{'seg' if design == 'segmented' else 'glob'}"] = fl
             df[f"anomaly_score_ratio_{'seg' if design == 'segmented' else 'glob'}"] = sc
         flagged_ = df[fl == 1]
+        prim = df["flag_seg"].values == 1
         abl_rows.append({"feature_space": space_name, "design": design, "n_flagged": int(fl.sum()),
-                         "injected_recall": recall_score(y_inj, fl), "injected_precision": precision_score(y_inj, fl),
-                         "pr_auc_vs_injected": average_precision_score(y_inj, sc),
                          "pct_flagged_in_top_income_decile": 100 * (flagged_["income_decile"] == 10).mean(),
-                         "spearman_score_vs_income": spearmanr(sc, df["Tot_IncLoss_amt"]).statistic})
-        for name, *_ in ANOMALY_TYPES:
-            m_ = (df["injected_type"] == name).values
-            abl_type_rows.append({"feature_space": space_name, "design": design, "type": name, "recall": fl[m_].mean()})
+                         "pct_flagged_below_median_income": 100 * (flagged_["Tot_IncLoss_amt"] < df["Tot_IncLoss_amt"].median()).mean(),
+                         "spearman_score_vs_income": spearmanr(sc, df["Tot_IncLoss_amt"]).statistic,
+                         "jaccard_with_primary_segmented": int(((fl == 1) & prim).sum()) / int(((fl == 1) | prim).sum()),
+                         "median_deduction_to_income_flagged": flagged_["deduction_to_income_ratio"].median()})
 ablation = pd.DataFrame(abl_rows).round(4)
-ablation_type = pd.DataFrame(abl_type_rows).pivot(index="type", columns=["feature_space", "design"], values="recall").round(4)
-ablation_type.columns = [f"{a} | {b}" for a, b in ablation_type.columns]
 savetab(ablation, "table_ablation_feature_space.csv", index=False)
-savetab(ablation_type, "table_ablation_recall_by_type.csv")
-log(ablation.to_string(index=False)); log(ablation_type.to_string())
+log(ablation.to_string(index=False))
 SUMMARY["ablation"] = ablation.to_dict("records")
 ov_ = int(((df["flag_ratio_seg"] == 1) & (df["flag_seg"] == 1)).sum())
 SUMMARY["ablation_overlap_ratio_seg_vs_primary_seg"] = ov_
 log(f"Overlap between primary segmented flags and ratio-only segmented flags: {ov_:,}")
 
+# ---- 13c. Stability of the segmented Isolation Forest across random seeds ----
+section("SECTION 13c - SCORE STABILITY ACROSS ISOLATION FOREST SEEDS")
+log("Segments are fixed (K-Means seed 42); only the Isolation Forest seed changes.  A reproducible rule should give")
+log("highly correlated scores and a large overlap of the 2% flag sets across seeds.")
+seed_scores, seed_flags = {}, {}
+for sd in STABILITY_SEEDS:
+    if sd == SEED:
+        seed_scores[sd] = df["anomaly_score_seg"].values; seed_flags[sd] = df["flag_seg"].values == 1
+        continue
+    sc_ = np.zeros(len(df))
+    for s_ in SEGMENTS:
+        m_ = (df["segment"] == s_).values
+        iso_ = IsolationForest(n_estimators=200, max_samples="auto", contamination=CONTAMINATION, random_state=sd, n_jobs=-1).fit(X_ad.values[m_])
+        sc_[m_] = -iso_.score_samples(X_ad.values[m_])
+    pr_ = pd.Series(sc_, index=df.index).groupby(df["segment"]).rank(pct=True, method="first")
+    seed_scores[sd] = sc_; seed_flags[sd] = flags_from_rank(pr_, CONTAMINATION).values == 1
+stab_rows = []
+for i, a in enumerate(STABILITY_SEEDS):
+    for b in STABILITY_SEEDS[i + 1:]:
+        stab_rows.append({"seed_a": a, "seed_b": b, "spearman_scores": spearmanr(seed_scores[a], seed_scores[b]).statistic,
+                          "jaccard_2pct_flags": int((seed_flags[a] & seed_flags[b]).sum()) / int((seed_flags[a] | seed_flags[b]).sum())})
+stability = pd.DataFrame(stab_rows).round(4)
+savetab(stability, "table_seed_stability.csv", index=False)
+n_seeds_flagged = np.sum([seed_flags[sd] for sd in STABILITY_SEEDS], axis=0)
+df["n_seeds_flagged"] = n_seeds_flagged
+consensus = pd.Series(n_seeds_flagged[df["flag_seg"].values == 1]).value_counts().sort_index()
+consensus_tab = pd.DataFrame({"seeds_flagging_the_record": consensus.index, "n_records_in_primary_flag_set": consensus.values,
+                              "pct": (100 * consensus.values / consensus.values.sum()).round(2)})
+savetab(consensus_tab, "table_seed_consensus.csv", index=False)
+log(stability.to_string(index=False)); log(consensus_tab.to_string(index=False))
+SUMMARY["seed_stability_mean_spearman"] = round(float(stability["spearman_scores"].mean()), 4)
+SUMMARY["seed_stability_mean_jaccard"] = round(float(stability["jaccard_2pct_flags"].mean()), 4)
+SUMMARY["pct_primary_flags_in_all_seeds"] = round(100 * float((n_seeds_flagged[df["flag_seg"].values == 1] == len(STABILITY_SEEDS)).mean()), 2)
+log(f"Mean pairwise Spearman={SUMMARY['seed_stability_mean_spearman']}  mean Jaccard={SUMMARY['seed_stability_mean_jaccard']}  "
+    f"primary flags confirmed by all {len(STABILITY_SEEDS)} seeds: {SUMMARY['pct_primary_flags_in_all_seeds']}%")
+
+# ---- 13d. Rule-based sanity checks: do flagged returns look different on simple, auditable rules? ----
+section("SECTION 13d - RULE-BASED SANITY CHECKS ON FLAGGED ROWS")
+log("Simple rules an analyst could apply by hand, compared between flagged and unflagged returns.  Agreement supports")
+log("face validity; it is not a measure of non-compliance.")
+seg_claim_rate = df.groupby("segment")[kept_amounts].apply(lambda g: (g != 0).mean())
+rare_item = pd.DataFrame(False, index=df.index, columns=kept_amounts)
+for s_ in SEGMENTS:
+    m_ = df["segment"] == s_
+    rare_cols = seg_claim_rate.columns[seg_claim_rate.loc[s_] < RARE_ITEM_PCT]
+    rare_item.loc[m_, rare_cols] = df.loc[m_, rare_cols] != 0
+df["n_rare_items"] = rare_item.sum(axis=1)
+seg_p99 = df.groupby("segment")["deduction_to_income_ratio"].transform(lambda x: x.quantile(0.99))
+rules = {
+    "deductions_exceed_income": df["Tot_ded_amt"] > df["Tot_IncLoss_amt"],
+    "claims_item_rare_in_segment": df["n_rare_items"] >= 1,
+    "claims_3plus_rare_items": df["n_rare_items"] >= 3,
+    "deduction_ratio_above_segment_p99": df["deduction_to_income_ratio"] > seg_p99,
+    "wre_above_25pct_of_salary": (df["Sw_amt"] > 20000) & (df["wre_to_salary_ratio"] > 0.25),
+    "rental_deductions_above_3x_rent": (df["Gross_rent_amt"] > 5000) & (df["rental_deduction_ratio"] > 3),
+    "investment_deductions_no_investment_income": (inv_income == 0) & ((df["Div_Ded_amt"] + df["Intrst_Ded_amt"]) > 0),
+    "taxable_income_identity_off_by_10pct": (base_ti > 1000) & ((df["taxable_income_ratio"] - 1).abs() > 0.10),
+}
+rule_rows = []
+for rule, m_ in rules.items():
+    r = {"rule": rule, "pct_all": 100 * m_.mean()}
+    for design, col in [("segmented", "flag_seg"), ("population_wide", "flag_glob")]:
+        f_ = df[col] == 1
+        r[f"pct_flagged_{design}"] = 100 * m_[f_].mean(); r[f"pct_unflagged_{design}"] = 100 * m_[~f_].mean()
+        r[f"lift_{design}"] = m_[f_].mean() / max(m_[~f_].mean(), 1e-9)
+    rule_rows.append(r)
+rule_tab = pd.DataFrame(rule_rows).round(3)
+savetab(rule_tab, "table_rule_sanity_checks.csv", index=False)
+log(rule_tab[["rule", "pct_all", "pct_flagged_segmented", "pct_unflagged_segmented", "lift_segmented"]].to_string(index=False))
+SUMMARY["rule_sanity_checks"] = rule_tab.to_dict("records")
+any_rule = np.column_stack([m_.values for m_ in rules.values()]).any(axis=1)
+SUMMARY["pct_flagged_seg_hitting_any_rule"] = round(100 * float(any_rule[df["flag_seg"].values == 1].mean()), 2)
+SUMMARY["pct_unflagged_seg_hitting_any_rule"] = round(100 * float(any_rule[df["flag_seg"].values == 0].mean()), 2)
+log(f"Flagged (segmented) rows hitting at least one rule: {SUMMARY['pct_flagged_seg_hitting_any_rule']}%  vs unflagged {SUMMARY['pct_unflagged_seg_hitting_any_rule']}%")
+
+fig, axes = plt.subplots(1, 2, figsize=(14, 4.4))
+lift = rule_tab.set_index("rule")[["pct_flagged_segmented", "pct_unflagged_segmented"]]
+lift.columns = ["flagged (segmented 2%)", "unflagged"]
+lift.plot(kind="barh", ax=axes[0], color=[PALETTE[3], PALETTE[7]]); axes[0].set_xlabel("% of returns meeting the rule"); axes[0].set_title("Rule-based sanity checks")
+axes[0].tick_params(axis="y", labelsize=7); axes[0].set_ylabel("")
+consensus_tab.set_index("seeds_flagging_the_record")["pct"].plot(kind="bar", ax=axes[1], color=PALETTE[0])
+axes[1].set_xlabel(f"number of seeds (of {len(STABILITY_SEEDS)}) that flag the record"); axes[1].set_ylabel("% of primary 2% flag set")
+axes[1].set_title("Seed consensus of the primary flag set"); axes[1].tick_params(axis="x", rotation=0)
+fig.suptitle("Fig. 12  Label-free validation: rule agreement and seed stability")
+savefig("fig12_label_free_validation.png")
+
 # ============================================================================
-# 14. STAGE 3 - SUPERVISED ANOMALY CLASSIFICATION
+# 14. STAGE 3 - SUPERVISED SURROGATE OF THE ANOMALY RULE
 # ============================================================================
-section("SECTION 14 - STAGE 3: SUPERVISED CLASSIFICATION (injected labels)")
-log("Target = injected synthetic anomaly (1) vs unmodified record (0).  This label is NOT a compliance outcome.")
+section("SECTION 14 - STAGE 3: SUPERVISED SURROGATE (target = Isolation Forest flag)")
+log("Target = segmented Isolation Forest flag at the 2% budget (1) vs not flagged (0).  No synthetic labels exist.")
+log("Question: how learnable and internally consistent is the anomaly rule?  A high hold-out F1 means the flag")
+log("follows a stable, describable pattern in the features; SHAP on this model then describes that pattern.")
 X_sup = X_ad.values
-y_sup = df["injected"].values
+y_sup = df["flag_seg"].values
 
 # ============================================================================
 # 15. TRAIN/TEST SPLIT (stratified)
@@ -870,45 +855,38 @@ SUMMARY["supervised_eval"] = sup_eval.to_dict("records")
 SUMMARY["supervised_cv"] = cv_tab.to_dict("records")
 
 # ============================================================================
-# 18. COMPARE SUPERVISED AND UNSUPERVISED RESULTS (same hold-out rows)
+# 18. AGREEMENT OF THE SURROGATE WITH BOTH FOREST DESIGNS (same hold-out rows)
 # ============================================================================
-section("SECTION 18 - SUPERVISED VERSUS UNSUPERVISED ON THE SAME HOLD-OUT ROWS")
+section("SECTION 18 - SURROGATE AGREEMENT WITH THE SEGMENTED AND POPULATION-WIDE FLAGS")
 te = df.iloc[idx_te]
 cmp_rows = []
-for label, f in [("Isolation Forest, segmented (2%)", te["flag_seg"].values), ("Isolation Forest, population-wide (2%)", te["flag_glob"].values)]:
-    cmp_rows.append({"method": label, "n_flagged": int(f.sum()), "precision": precision_score(y_te, f), "recall": recall_score(y_te, f),
-                     "f1": f1_score(y_te, f), "roc_auc": roc_auc_score(y_te, te["anomaly_score_seg"] if "segmented" in label else te["anomaly_score_glob"]),
-                     "pr_auc": average_precision_score(y_te, te["anomaly_score_seg"] if "segmented" in label else te["anomaly_score_glob"])})
 for name in fitted:
     p = probas[name]; top = np.zeros_like(y_te); top[np.argsort(-p)[:budget_k]] = 1
-    cmp_rows.append({"method": f"{name} (top 2% budget)", "n_flagged": int(top.sum()), "precision": precision_score(y_te, top),
-                     "recall": recall_score(y_te, top), "f1": f1_score(y_te, top), "roc_auc": roc_auc_score(y_te, p), "pr_auc": average_precision_score(y_te, p)})
+    for design, col in [("segmented", "flag_seg"), ("population-wide", "flag_glob")]:
+        f = te[col].values
+        both_ = int(((top == 1) & (f == 1)).sum()); union_ = int(((top == 1) | (f == 1)).sum())
+        cmp_rows.append({"model": name, "reference_flags": f"Isolation Forest, {design} (2%)", "n_reference_flagged": int(f.sum()),
+                         "n_model_top2pct": int(top.sum()), "overlap": both_, "jaccard": both_ / union_,
+                         "roc_auc_vs_reference": roc_auc_score(f, p), "pr_auc_vs_reference": average_precision_score(f, p)})
 sup_vs_unsup = pd.DataFrame(cmp_rows).round(4)
-savetab(sup_vs_unsup, "table_supervised_vs_unsupervised.csv", index=False)
+savetab(sup_vs_unsup, "table_surrogate_agreement.csv", index=False)
 log(sup_vs_unsup.to_string(index=False))
-SUMMARY["supervised_vs_unsupervised"] = sup_vs_unsup.to_dict("records")
-
-# agreement between RF and the segmented forest on NATURAL (non-injected) flags
+SUMMARY["surrogate_agreement"] = sup_vs_unsup.to_dict("records")
 p_rf = probas["Random Forest"]
-nat = (te["flag_seg"].values == 1) & (y_te == 0)
-SUMMARY["natural_seg_flags_in_test"] = int(nat.sum())
-SUMMARY["natural_seg_flags_rf_prob_median"] = round(float(np.median(p_rf[nat])), 4) if nat.sum() else None
-SUMMARY["natural_seg_flags_rf_positive_pct"] = round(100 * float((p_rf[nat] >= 0.5).mean()), 2) if nat.sum() else None
-log(f"Natural (non-injected) segmented flags in test set: {nat.sum():,}; RF calls {SUMMARY['natural_seg_flags_rf_positive_pct']}% of them anomalous")
 
 fig, axes = plt.subplots(1, 3, figsize=(15, 4.3))
 for name in fitted:
     fpr, tpr, _ = roc_curve(y_te, probas[name]); axes[0].plot(fpr, tpr, label=f"{name} (AUC={roc_auc_score(y_te, probas[name]):.3f})")
     pr, rc, _ = precision_recall_curve(y_te, probas[name]); axes[1].plot(rc, pr, label=f"{name} (AP={average_precision_score(y_te, probas[name]):.3f})")
-for label, sc in [("IF segmented", te["anomaly_score_seg"]), ("IF population-wide", te["anomaly_score_glob"])]:
-    fpr, tpr, _ = roc_curve(y_te, sc); axes[0].plot(fpr, tpr, ls="--", label=f"{label} (AUC={roc_auc_score(y_te, sc):.3f})")
-    pr, rc, _ = precision_recall_curve(y_te, sc); axes[1].plot(rc, pr, ls="--", label=f"{label} (AP={average_precision_score(y_te, sc):.3f})")
+sc = te["anomaly_score_glob"]
+fpr, tpr, _ = roc_curve(y_te, sc); axes[0].plot(fpr, tpr, ls="--", label=f"IF population-wide score (AUC={roc_auc_score(y_te, sc):.3f})")
+pr, rc, _ = precision_recall_curve(y_te, sc); axes[1].plot(rc, pr, ls="--", label=f"IF population-wide score (AP={average_precision_score(y_te, sc):.3f})")
 axes[0].plot([0, 1], [0, 1], color="grey", lw=0.7); axes[0].set_xlabel("false positive rate"); axes[0].set_ylabel("true positive rate"); axes[0].set_title("ROC curves (hold-out)"); axes[0].legend(fontsize=7)
 axes[1].set_xlabel("recall"); axes[1].set_ylabel("precision"); axes[1].set_title("Precision-recall curves (hold-out)"); axes[1].legend(fontsize=7)
 cm = confusion_matrix(y_te, (p_rf >= 0.5).astype(int))
-sns.heatmap(cm, annot=True, fmt=",d", cmap="Blues", cbar=False, ax=axes[2], xticklabels=["pred normal", "pred anomalous"], yticklabels=["normal", "injected"])
+sns.heatmap(cm, annot=True, fmt=",d", cmap="Blues", cbar=False, ax=axes[2], xticklabels=["pred not flagged", "pred flagged"], yticklabels=["not flagged", "IF flagged"])
 axes[2].set_title("Random Forest confusion matrix (threshold 0.5)")
-fig.suptitle("Fig. 7  Supervised classification of injected anomalies")
+fig.suptitle("Fig. 7  Supervised surrogate of the segmented Isolation Forest flag (hold-out)")
 savefig("fig07_supervised_evaluation.png")
 
 # ============================================================================
@@ -1062,9 +1040,9 @@ fig, axes = plt.subplots(1, 2, figsize=(15, 6))
 plt.sca(axes[0])
 top_rf = rf_imp.index[:15].tolist()
 shap.summary_plot(sv_rf[:, [AD_FEATURES.index(f) for f in top_rf]], disp_te[top_rf], feature_names=top_rf, show=False, max_display=15, plot_size=None)
-axes[0].set_xlabel("SHAP value (towards P(injected anomaly))"); axes[0].set_title("Beeswarm (top 15)")
-rf_imp.head(15)[::-1].plot(kind="barh", ax=axes[1], color=PALETTE[2]); axes[1].set_xlabel("mean |SHAP|"); axes[1].set_title("Global importance, Random Forest")
-fig.suptitle("Fig. 11  SHAP global explanation of the supervised Random Forest")
+axes[0].set_xlabel("SHAP value (towards P(flagged by the segment forest))"); axes[0].set_title("Beeswarm (top 15)")
+rf_imp.head(15)[::-1].plot(kind="barh", ax=axes[1], color=PALETTE[2]); axes[1].set_xlabel("mean |SHAP|"); axes[1].set_title("Global importance, surrogate Random Forest")
+fig.suptitle("Fig. 11  SHAP global explanation of the supervised surrogate Random Forest")
 savefig("fig11_shap_rf_global.png")
 
 # ============================================================================
@@ -1083,10 +1061,11 @@ def explain_one(row_idx):
 
 
 flagged = df[df["flag_seg"] == 1]
+non_wage = flagged[~flagged["segment_name"].str.contains("Wage")]
 case_ids = {
-    "highest-score injected rental-deduction anomaly (A3)": flagged[flagged["injected_type"] == "A3_rental_deduction"].sort_values("anomaly_pct_rank_seg", ascending=False).index[0],
-    "highest-score natural (non-injected) profile": flagged[flagged["injected"] == 0].sort_values("anomaly_pct_rank_seg", ascending=False).index[0],
-    "borderline flagged profile": flagged.sort_values("anomaly_pct_rank_seg").index[0],
+    "highest-score flagged taxpayer overall": flagged.sort_values(["anomaly_pct_rank_seg", "anomaly_score_seg"], ascending=False).index[0],
+    "highest-score flagged taxpayer in a non-wage segment": non_wage.sort_values(["anomaly_pct_rank_seg", "anomaly_score_seg"], ascending=False).index[0],
+    "borderline flagged profile (lowest flagged pct-rank)": flagged.sort_values("anomaly_pct_rank_seg").index[0],
 }
 local_rows, panel_files = [], []
 for n_, (label, rid) in enumerate(case_ids.items()):
@@ -1096,11 +1075,11 @@ for n_, (label, rid) in enumerate(case_ids.items()):
     plt.figure(figsize=(7.5, 6.5))
     ex = shap.Explanation(values=vals, base_values=base, data=dv.values.astype(float), feature_names=AD_FEATURES)
     shap.plots.waterfall(ex, max_display=10, show=False)
-    plt.title(f"({chr(97 + n_)}) {label}\n{SEG_NAME[s]} | Ind={int(df.loc[rid, 'Ind'])} | type={df.loc[rid, 'injected_type']} | within-segment pct-rank={df.loc[rid, 'anomaly_pct_rank_seg']:.4f}", fontsize=8.5)
+    plt.title(f"({chr(97 + n_)}) {label}\n{SEG_NAME[s]} | Ind={int(df.loc[rid, 'Ind'])} | seeds flagging={int(df.loc[rid, 'n_seeds_flagged'])}/{len(STABILITY_SEEDS)} | within-segment pct-rank={df.loc[rid, 'anomaly_pct_rank_seg']:.4f}", fontsize=8.5)
     fn = f"fig10{chr(97 + n_)}_waterfall.png"; panel_files.append(fn)
     savefig(fn)
     for j in order[:5]:
-        local_rows.append({"case": label, "Ind": int(df.loc[rid, "Ind"]), "segment": SEG_NAME[s], "injected_type": df.loc[rid, "injected_type"],
+        local_rows.append({"case": label, "Ind": int(df.loc[rid, "Ind"]), "segment": SEG_NAME[s], "n_seeds_flagged": int(df.loc[rid, "n_seeds_flagged"]),
                            "anomaly_score": round(df.loc[rid, "anomaly_score_seg"], 4), "feature": AD_FEATURES[j],
                            "feature_value": round(float(dv.iloc[j]), 3), "contribution_towards_anomaly": round(float(vals[j]), 4)})
     log(f"  {label}: Ind={int(df.loc[rid, 'Ind'])} {SEG_NAME[s]} -> top features: " +
@@ -1119,9 +1098,10 @@ rank_rows = []
 for rid in flagged.sort_values("anomaly_pct_rank_seg", ascending=False).index[:15]:
     vals, base, s = explain_one(rid); dv = display_values([rid]).iloc[0]
     order = np.argsort(-vals)[:3]
-    rank_rows.append({"Ind": int(df.loc[rid, "Ind"]), "segment": SEG_NAME[s], "injected_type": df.loc[rid, "injected_type"],
+    rank_rows.append({"Ind": int(df.loc[rid, "Ind"]), "segment": SEG_NAME[s], "n_seeds_flagged": int(df.loc[rid, "n_seeds_flagged"]),
+                      "rf_surrogate_probability": round(float(rf.predict_proba(X_ad.loc[[rid]].values)[0, 1]), 4),
                       "anomaly_score": round(df.loc[rid, "anomaly_score_seg"], 4), "total_income": df.loc[rid, "Tot_IncLoss_amt"],
-                      "total_deductions": df.loc[rid, "Tot_ded_amt"],
+                      "total_deductions": df.loc[rid, "Tot_ded_amt"], "n_rare_items": int(df.loc[rid, "n_rare_items"]),
                       "top_drivers": "; ".join(f"{AD_FEATURES[j]}={dv.iloc[j]:,.2f}" for j in order)})
 savetab(pd.DataFrame(rank_rows), "table_top15_review_list.csv", index=False)
 
@@ -1133,7 +1113,7 @@ fig, ax = plt.subplots(figsize=(7.5, 9.5)); ax.axis("off")
 steps = ["Raw taxpayer data\n(ATO 2022-23 individual sample file)", "Data preprocessing\n(sparsity + redundancy screens, signed-log, scaling)",
          "Feature engineering\n(income-composition shares, behavioural ratios)", "Stage 1: Taxpayer segmentation\n(K-Means on income composition and scale)",
          "Peer-group formation\n(one segment = one peer group)", "Stage 2: Isolation Forest within each segment\n(compared with a population-wide forest)",
-         "Stage 3: Supervised classification\n(Random Forest / gradient boosting on injected labels)", "Stage 4: SHAP explainability\n(surrogate for segments; TreeExplainer for forests)",
+         "Stage 3: Supervised surrogate of the anomaly rule\n(Random Forest / gradient boosting on Isolation Forest flags)", "Stage 4: SHAP explainability\n(surrogate for segments; TreeExplainer for forests)",
          "Risk interpretation and visualisation\n(review lists, thresholds, local explanations)"]
 for i, s_ in enumerate(steps):
     y = 1 - (i + 0.5) / len(steps)
@@ -1149,7 +1129,7 @@ savefig("fig01_framework.png")
 # ============================================================================
 section("SECTION 23 - EXPORT")
 out_cols = ["Ind", "segment", "segment_name", "occupation", "age_range", "lodged_via_agent", "Tot_IncLoss_amt", "Taxable_Income", "Tot_ded_amt",
-            "injected", "injected_type", "anomaly_score_seg", "anomaly_pct_rank_seg", "anomaly_score_glob"] + \
+            "anomaly_score_seg", "anomaly_pct_rank_seg", "anomaly_score_glob", "n_seeds_flagged", "n_rare_items"] + \
            [f"flag_seg_{int(c * 100)}pct" for c in CONTAMINATION_GRID] + [f"flag_glob_{int(c * 100)}pct" for c in CONTAMINATION_GRID] +            ["flag_ratio_seg", "flag_ratio_glob", "anomaly_score_ratio_seg", "anomaly_score_ratio_glob"] + RATIO_NAMES
 scores = df[out_cols].copy()
 scores["rf_probability"] = np.nan
@@ -1194,11 +1174,10 @@ with open(MODEL_DIR / "model_metadata.json", "w", encoding="utf-8") as fh:
     json.dump(model_metadata, fh, indent=2)
 
 SUMMARY["runtime_seconds"] = round(time.time() - T0, 1)
-SUMMARY["natural_flags_seg"] = int(((df["flag_seg"] == 1) & (df["injected"] == 0)).sum())
-SUMMARY["natural_flags_glob"] = int(((df["flag_glob"] == 1) & (df["injected"] == 0)).sum())
+SUMMARY["run_tag"] = RUN_TAG
 with open(RES / "summary.json", "w", encoding="utf-8") as fh:
     json.dump(SUMMARY, fh, indent=2, default=lambda o: o.item() if hasattr(o, "item") else str(o))
-log(f"Saved results/taxpayer_scores.csv ({len(scores):,} rows) and results/summary.json")
+log(f"Saved {RES.name}/taxpayer_scores.csv ({len(scores):,} rows) and {RES.name}/summary.json")
 log(f"Saved {len(seg_models) + 4} reusable model artifacts and model_metadata.json in models/")
 log(f"Total runtime: {SUMMARY['runtime_seconds']} s")
 log("DONE.  Reminder: an anomaly flag is a statistical signal relative to a peer group, not evidence of non-compliance.")

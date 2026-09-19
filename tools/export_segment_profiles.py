@@ -34,6 +34,7 @@ SUMMARY_PUBLIC = ROOT / "results" / "summary_public.json"
 # summary.json keys that quote individual sample-file records
 PER_RECORD_SUMMARY_KEYS = {"local_cases"}
 QUANTILE_GRID = np.linspace(0.0, 1.0, 101)
+MIN_LINE_PREVALENCE = 0.25   # a line must be used by >= 25% of claimants to receive a share
 
 # Combined dashboard fields and the itemised ATO columns they are spread across.
 SPLIT_GROUPS = {
@@ -56,9 +57,14 @@ def export_input_splits() -> None:
     raw = raw.apply(pd.to_numeric, errors="coerce").fillna(0.0).clip(lower=0.0)
     splits = {}
     for group, cols in SPLIT_GROUPS.items():
-        totals = raw[cols].sum()
-        share = totals / totals.sum() if totals.sum() > 0 else totals * 0 + 1 / len(cols)
-        splits[group] = {c: round(float(share[c]), 4) for c in cols}
+        claimants = raw[cols].sum(axis=1) > 0
+        # Spread a total only across the lines most claimants actually use;
+        # putting a slice into a minority line would manufacture a rare item.
+        prevalence = (raw.loc[claimants, cols] > 0).mean()
+        common = [c for c in cols if prevalence[c] >= MIN_LINE_PREVALENCE] or cols
+        totals = raw[common].sum()
+        share = totals / totals.sum() if totals.sum() > 0 else totals * 0 + 1 / len(common)
+        splits[group] = {c: round(float(share[c]), 4) for c in common}
     SPLITS_OUT.write_text(json.dumps(splits, indent=2), encoding="utf-8")
     print(f"Wrote {SPLITS_OUT}")
 

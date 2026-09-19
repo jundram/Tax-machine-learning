@@ -19,18 +19,12 @@ ROOT = Path(__file__).resolve().parent
 DEFAULT_SPLITS_PATH = ROOT / "models" / "input_splits.json"
 
 # Used when input_splits.json has not been exported (e.g. synthetic artifacts).
+# Only lines used by most claimants receive a share (see tools/export_segment_profiles.py).
 FALLBACK_SPLITS: dict[str, dict[str, float]] = {
-    "work_related_expenses": {
-        "WRE_car_amt": 0.45, "WRE_trvl_amt": 0.10, "WRE_uniform_amt": 0.08,
-        "WRE_self_amt": 0.07, "WRE_other_amt": 0.30,
-    },
-    "rental_deductions": {
-        "Rent_int_ded_amt": 0.55, "Other_rent_ded_amt": 0.35, "Rent_cap_wks_amt": 0.10,
-    },
-    "investment_income": {
-        "Grs_int_amt": 0.45, "Frk_Div_amt": 0.45, "Unfranked_Div_amt": 0.10,
-    },
-    "investment_deductions": {"Intrst_Ded_amt": 0.85, "Div_Ded_amt": 0.15},
+    "work_related_expenses": {"WRE_car_amt": 0.42, "WRE_uniform_amt": 0.09, "WRE_other_amt": 0.49},
+    "rental_deductions": {"Rent_int_ded_amt": 0.44, "Other_rent_ded_amt": 0.48, "Rent_cap_wks_amt": 0.08},
+    "investment_income": {"Grs_int_amt": 0.31, "Frk_Div_amt": 0.69},
+    "investment_deductions": {"Intrst_Ded_amt": 0.39, "Div_Ded_amt": 0.61},
 }
 
 # Franking credit attached to a fully franked dividend at the 30 % company rate.

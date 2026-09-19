@@ -1,5 +1,5 @@
 model,silhouette,davies_bouldin,smallest_pct
-K-Means (k=8),0.6528,0.7186,1.3119
-"Gaussian Mixture (diag, k=8)",0.1486,2.5848,4.1971
-"Gaussian Mixture (full, k=8)",0.2016,2.6426,4.1927
-"Ward agglomerative (k=8, 8,000-row sample)",0.6422,0.7114,0.9375
+K-Means (k=8),0.6576,0.716,1.3119
+"Gaussian Mixture (diag, k=8)",0.1551,2.6867,4.1971
+"Gaussian Mixture (full, k=8)",0.206,2.7106,4.1927
+"Ward agglomerative (k=8, 8,000-row sample)",0.6085,0.8258,1.0125

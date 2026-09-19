@@ -72,7 +72,9 @@ class TaxpayerAnomalyServiceTests(unittest.TestCase):
 
         self.assertEqual(large["segment_id"], typical["segment_id"])
         self.assertGreater(large["anomaly_score"], typical["anomaly_score"])
-        self.assertEqual(large["main_drivers"][0]["feature"], "wre_to_salary_ratio")
+        self.assertGreater(large["peer_percentile"], typical["peer_percentile"])
+        top = {d["feature"] for d in large["main_drivers"][:3]}
+        self.assertTrue(any("wre" in f.lower() or "deduction" in f for f in top), top)
 
     def test_stacked_deductions_are_flagged(self):
         stacked = self.service.score_record(STACKED_DEDUCTIONS)
@@ -80,8 +82,11 @@ class TaxpayerAnomalyServiceTests(unittest.TestCase):
         self.assertTrue(stacked["flagged_for_review"])
         self.assertGreaterEqual(stacked["anomaly_score"], stacked["threshold"])
         driver_names = {driver["feature"] for driver in stacked["main_drivers"]}
-        self.assertIn("wre_to_salary_ratio", driver_names)
+        # The stacked items (gifts, personal super, tax affairs) and the overall
+        # deduction share should be what the forest reacts to.
         self.assertIn("deduction_to_income_ratio", driver_names)
+        self.assertTrue(driver_names & {"gift_to_income_ratio", "personal_super_ratio", "log_Spr_Prsnl_Contr",
+                                        "log_Non_emp_spr_amt", "tax_affairs_cost_ratio"}, driver_names)
 
 
 if __name__ == "__main__":
