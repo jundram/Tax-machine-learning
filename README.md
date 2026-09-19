@@ -31,6 +31,7 @@ must never be, committed to this repository.
 | `research_agent.py` | Deterministic retrieval over `ato_knowledge_base.json`; writes the review narrative and answers questions without calling an external model |
 | `taxpayer_framework.py` | The full research pipeline (segmentation, model selection, contamination sweep, label-free validation, surrogate models, SHAP) that produced the artifacts |
 | `tools/export_segment_profiles.py` | Summarises the row-level results into aggregate per-segment statistics (`segment_profiles.json`) and population-typical itemisation proportions (`input_splits.json`) for the dashboard |
+| `tools/export_top_flagged.py` | Explains the ten highest-scoring flagged returns as rounded multiples of population statistics (`results/top_flagged_public.json`); no identifiers or amounts |
 | `models/` | Fitted scalers, K-Means, per-segment Isolation Forests, `model_metadata.json`, `segment_profiles.json`, `input_splits.json` |
 | `figures/`, `tables/`, `results/summary_public.json` | Aggregate outputs of the training run (see *Data confidentiality*) |
 | `test_*.py` | Unit tests |
@@ -68,6 +69,7 @@ above this repository), then:
 ```bash
 python taxpayer_framework.py                 # ~15 min; writes models/, figures/, tables/, results/
 python tools/export_segment_profiles.py      # aggregate profiles, input splits and the public summary
+python tools/export_top_flagged.py           # top-10 flagged returns as rounded multiples (no identifiers or amounts)
 ```
 
 If the data file is absent, the framework generates a schema-matched synthetic
