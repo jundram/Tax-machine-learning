@@ -25,7 +25,7 @@ must never be, committed to this repository.
 
 | Path | Purpose |
 |---|---|
-| `app.py` | Streamlit dashboard (TaxLens): Overview with score card, peer-group context, driving factors and a docked review assistant; Record entry form; Guidance page; About page presenting the model and its label-free evaluation |
+| `app.py` | Streamlit dashboard (TaxLens): Overview with score card, peer-group context, driving factors and a docked review assistant; Record entry form; Guidance page; About page describing the fitted model and its peer groups |
 | `anomaly_service.py` | Loads the fitted pipeline and scores one record: peer group → anomaly score → threshold → SHAP drivers and protective factors |
 | `record_builder.py` | Turns the dashboard's plain-language fields (salary, work-related expenses, rental income and deductions, …) into the itemised ATO record the model expects, deriving total income, total deductions and taxable income |
 | `research_agent.py` | Deterministic retrieval over `ato_knowledge_base.json`; writes the review narrative and answers questions without calling an external model |
@@ -108,7 +108,7 @@ Label-free validation replaces injected-anomaly metrics: agreement between the
 segmented and population-wide designs at every budget, flag rates by peer
 group and income decile, a ratios-only feature-space ablation, score stability
 across five Isolation Forest seeds, and rule-based sanity checks on flagged
-rows. The **About** page of the dashboard presents these numbers.
+rows. These numbers are presented in the accompanying results report; the dashboard's **About** page describes the fitted model.
 
 Developed as a Master of Data Science capstone project. The scikit-learn
 version is pinned in `requirements.txt` because the pickled artifacts are

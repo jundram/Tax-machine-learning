@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-import json
 from datetime import datetime
 from pathlib import Path
 
-import altair as alt
-import numpy as np
 import pandas as pd
 import streamlit as st
 
@@ -105,7 +102,7 @@ st.markdown(
     * {{scrollbar-width: thin; scrollbar-color: var(--line) transparent;}}
     *:focus-visible {{outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px;}}
     .ic {{flex: none; vertical-align: -3px;}}
-    .num, td, .value, .stat .value {{font-variant-numeric: tabular-nums;}}
+    .num, td, .value {{font-variant-numeric: tabular-nums;}}
 
     /* ---------- top bar ---------- */
     .brand {{display: inline-flex; align-items: center; gap: 0.6rem; padding-top: 0.2rem;}}
@@ -153,11 +150,9 @@ st.markdown(
     .icon.teal {{background: var(--accent-soft); color: var(--accent-ink);}}
     .icon.navy {{background: var(--surface-2); color: var(--ink);}}
     .icon.amber {{background: var(--amber-soft); color: var(--amber-ink);}}
-    .kpi, .stat {{background: var(--surface); border: var(--card-border); box-shadow: var(--card-shadow); border-radius: var(--radius); padding: calc(0.9rem * var(--d)) calc(1.1rem * var(--d)); display: flex; align-items: center; gap: 0.9rem; margin-bottom: calc(1rem * var(--d));}}
-    .kpi .label, .stat .label {{color: var(--muted); font-size: 0.9rem;}}
-    .kpi .value, .stat .value {{color: var(--ink); font-size: 1.85rem; font-weight: 800; line-height: 1.15; letter-spacing: -0.02em;}}
-    .stat .value {{font-size: 2rem;}}
-    .stat .icon {{width: 44px; height: 44px;}}
+    .kpi {{background: var(--surface); border: var(--card-border); box-shadow: var(--card-shadow); border-radius: var(--radius); padding: calc(0.9rem * var(--d)) calc(1.1rem * var(--d)); display: flex; align-items: center; gap: 0.9rem; margin-bottom: calc(1rem * var(--d));}}
+    .kpi .label {{color: var(--muted); font-size: 0.9rem;}}
+    .kpi .value {{color: var(--ink); font-size: 1.85rem; font-weight: 800; line-height: 1.15; letter-spacing: -0.02em;}}
     .kpi .side {{margin-left: auto; padding-left: 0.9rem; border-left: 1px solid var(--line); color: var(--muted); font-size: 0.8rem; text-align: center; min-width: 62px;}}
 
     /* ---------- score card ---------- */
@@ -224,10 +219,6 @@ st.markdown(
     .disclaimer b {{color: var(--amber-ink);}}
     .chart-title {{font-weight: 700; font-size: 1.12rem; color: var(--ink); margin: 0 0 0.2rem 0;}}
     .chart-note {{color: var(--muted); font-size: 0.85rem; margin-top: 0.2rem;}}
-    .finding-card {{display: flex; gap: 0.9rem; align-items: flex-start; padding: 0.4rem 0.2rem;}}
-    .finding-card .no {{background: var(--accent-soft); color: var(--accent-ink); border-radius: var(--radius-sm); width: 48px; height: 48px; display: inline-flex; align-items: center; justify-content: center; font-weight: 800; font-size: 1.05rem; flex: none;}}
-    .finding-card h4 {{margin: 0 0 0.2rem 0; font-size: 1.02rem;}}
-    .finding-card p {{margin: 0; color: var(--muted); font-size: 0.92rem; line-height: 1.45;}}
     </style>
     """,
     unsafe_allow_html=True,
@@ -427,7 +418,6 @@ pill_col.markdown(
     f'<span class="status-pill"><i></i>{"ATO sample-file model" if REAL_DATA else "Synthetic demo"}</span>',
     unsafe_allow_html=True,
 )
-SUMMARY_PATH = Path(service.model_dir).parent / "results" / "summary_public.json"
 
 
 # ----------------------------------------------------------------------------
@@ -684,213 +674,51 @@ def render_guidance() -> None:
 
 
 # ----------------------------------------------------------------------------
-# About page: the model and its label-free evaluation on the real-data run
+# About page: the fitted model
 # ----------------------------------------------------------------------------
-@st.cache_data
-def load_summary() -> dict | None:
-    return json.loads(SUMMARY_PATH.read_text(encoding="utf-8")) if SUMMARY_PATH.exists() else None
-
-
-def score_distribution_chart(profile: dict, threshold: float, bins: int = 40) -> alt.Chart:
-    """Histogram of the segment's anomaly scores, derived from its quantile curve (CDF)."""
-    q = np.asarray(profile["score_quantiles"], dtype=float)
-    grid = np.asarray(profile["score_quantile_grid"], dtype=float)
-    edges = np.linspace(q[0], q[-1], bins + 1)
-    cdf = np.interp(edges, q, grid)
-    share = np.diff(cdf)
-    mids = (edges[:-1] + edges[1:]) / 2
-    frame = pd.DataFrame({"x": mids, "share": share})
-    base = alt.Chart(frame).encode(
-        x=alt.X("x:Q", title="Isolation Forest anomaly score", scale=alt.Scale(domain=[float(edges[0]), float(edges[-1])]),
-                axis=alt.Axis(grid=False, format=".2f")),
-        y=alt.Y("share:Q", title="Share of returns", axis=alt.Axis(format=".0%", grid=True)),
-        tooltip=[alt.Tooltip("x:Q", title="Score", format=".3f"), alt.Tooltip("share:Q", title="Share of returns", format=".1%")],
-    )
-    norm = base.mark_area(interpolate="monotone", color="#5FA8A0", opacity=0.85, line={"color": "#2F8F86"})
-    review = base.transform_filter(alt.datum.x >= threshold).mark_area(interpolate="monotone", color="#E0A32A", opacity=0.95)
-    bars = alt.layer(norm, review)
-    rule = alt.Chart(pd.DataFrame({"t": [threshold]})).mark_rule(color="#C43D2F", strokeWidth=2, strokeDash=[5, 3]).encode(x="t:Q")
-    label = alt.Chart(pd.DataFrame({"t": [threshold], "l": [f"Review cut-off {threshold:.3f}"]})).mark_text(
-        align="right", dx=-6, color="#C43D2F", fontWeight="bold", fontSize=11, baseline="top"
-    ).encode(x="t:Q", y=alt.value(6), text="l:N")
-    return alt.layer(bars, rule, label).properties(height=230).configure_view(strokeWidth=0)
-
-
-def threshold_sensitivity_chart(sweep: list[dict], selected: float) -> alt.Chart:
-    frame = pd.DataFrame([{"budget": f"{int(round(r['contamination'] * 100))}%", "flagged": r["n_flagged_segmented"],
-                           "selected": abs(r["contamination"] - selected) < 1e-9, "jaccard": r.get("jaccard")} for r in sweep])
-    bars = alt.Chart(frame).mark_bar(cornerRadiusEnd=4, size=54).encode(
-        x=alt.X("budget:N", title="Review threshold (top %)", sort=None, axis=alt.Axis(labelAngle=0)),
-        y=alt.Y("flagged:Q", title="Records flagged", axis=alt.Axis(format=",.0f", grid=True)),
-        color=alt.Color("selected:N", scale=alt.Scale(domain=[True, False], range=[TEAL, "#9ED3D6"]), legend=None),
-        tooltip=[alt.Tooltip("budget:N", title="Budget"), alt.Tooltip("flagged:Q", title="Flagged", format=","),
-                 alt.Tooltip("jaccard:Q", title="Agreement with population-wide", format=".2f")],
-    )
-    text = alt.Chart(frame).mark_text(dy=-8, fontSize=12, fontWeight="bold", color=INK).encode(
-        x=alt.X("budget:N", sort=None), y="flagged:Q", text=alt.Text("flagged:Q", format=","))
-    return alt.layer(bars, text).properties(height=230).configure_view(strokeWidth=0)
-
-
-def shap_contribution_chart(importance: dict[str, float], top: int = 8) -> alt.Chart:
-    items = list(importance.items())[:top]
-    frame = pd.DataFrame({"feature": [research_agent.friendly_feature(f).capitalize() for f, _ in items],
-                          "value": [v for _, v in items]})
-    return alt.Chart(frame).mark_bar(cornerRadiusEnd=4, color="#2F8F86").encode(
-        y=alt.Y("feature:N", sort=None, title=None, axis=alt.Axis(labelLimit=240)),
-        x=alt.X("value:Q", title="Mean absolute SHAP contribution", axis=alt.Axis(grid=True)),
-        tooltip=[alt.Tooltip("feature:N", title="Feature"), alt.Tooltip("value:Q", title="Mean |SHAP|", format=".3f")],
-    ).properties(height=26 * len(frame) + 40).configure_view(strokeWidth=0)
-
-
-def _rule(summary: dict, name: str) -> dict:
-    return next((r for r in summary.get("rule_sanity_checks", []) if r["rule"] == name), {})
-
-
 def render_about() -> None:
-    summary = load_summary()
-    if summary is None:
-        st.warning("No results summary found. Run `python taxpayer_framework.py` and "
-                   "`python tools/export_segment_profiles.py` to produce results/summary_public.json.")
-        return
-
-    n_records = summary["n_records"]
-    n_ratios = len(summary.get("ratio_features", []))
-    n_features = summary.get("n_ad_features", len(metadata["anomaly_features"]))
-    n_flagged = summary["n_flagged_seg"]
-    budget = metadata["contamination"]
-    label_free = summary.get("n_injected", 0) == 0
-
-    t1, t2 = st.columns([4, 1.3], vertical_alignment="center")
-    t1.markdown(
-        '<div class="title-row"><h1>About the model</h1></div>'
-        f'<div class="subtitle">Isolation Forest &nbsp;·&nbsp; {summary["data_source"]}<br>'
-        "Exploring unusual financial-ratio profiles within taxpayer peer groups.</div>",
-        unsafe_allow_html=True,
-    )
-    t2.markdown(
-        f'<span class="badge soft">{icon("alert", 16)}{"Label-free evaluation" if label_free else "Includes injected test anomalies"}</span>',
-        unsafe_allow_html=True,
-    )
-
-    k1, k2, k3, k4 = st.columns(4)
-    for col, icon_name, label, value in (
-        (k1, "file", "Records analysed", f"{n_records:,}"),
-        (k2, "chart", "Behavioural features", f"{n_features} <span style='font-size:1rem;color:{MUTED};font-weight:600'>incl. {n_ratios} ratios</span>"),
-        (k3, "pie", "Review threshold", f"Top {budget:.0%}"),
-        (k4, "alert", "Flagged for review", f"{n_flagged:,}"),
-    ):
-        col.markdown(f'<div class="stat">{tile(icon_name)}<div><div class="label">{label}</div>'
-                     f'<div class="value">{value}</div></div></div>', unsafe_allow_html=True)
-    st.write("")
-
-    c1, c2 = st.columns([1.15, 1], gap="medium")
-    with c1, st.container(border=True):
-        st.markdown('<div class="chart-title">Anomaly score distribution</div>', unsafe_allow_html=True)
-        names = metadata["segment_names"]
-        chosen = st.selectbox("Peer group", list(names), format_func=lambda k: names[k], key="research_segment",
-                              label_visibility="collapsed")
-        profile = service.segment_profiles.get(chosen)
-        if profile:
-            st.altair_chart(score_distribution_chart(profile, metadata["segment_thresholds"][chosen]), width="stretch")
-            st.markdown(f'<div class="chart-note">Density reconstructed from the score quantiles of {profile["n_records"]:,} returns; '
-                        f'the top {budget:.0%} of each peer group lies beyond its own cut-off.</div>', unsafe_allow_html=True)
-        else:
-            st.info("Segment profiles not exported yet.")
-    with c2, st.container(border=True):
-        st.markdown('<div class="chart-title">Review threshold sensitivity</div>', unsafe_allow_html=True)
-        st.altair_chart(threshold_sensitivity_chart(summary["contamination_sweep"], budget), width="stretch")
-        agree = {round(r["contamination"], 3): r.get("jaccard") or 0 for r in summary["contamination_sweep"]}
-        st.markdown(
-            f'<div class="chart-note">Review budget, not an estimate of non-compliance. Agreement with a single '
-            f'population-wide forest rises from {agree.get(0.01, 0):.0%} of flags at 1% to {agree.get(0.1, 0):.0%} at 10%.</div>',
-            unsafe_allow_html=True,
-        )
-
-    c3, c4 = st.columns([1, 1], gap="medium")
-    with c3, st.container(border=True):
-        st.markdown('<div class="chart-title">Peer-group results</div>', unsafe_allow_html=True)
-        rows = [{"Group": r["segment_name"].split(": ", 1)[-1], "Analysed": r["n"], "Flagged": r["flagged_segmented"],
-                 "Flag rate": r["rate_segmented_pct"] / 100, "One forest for all": r["rate_population_wide_pct"] / 100}
-                for r in summary["flag_rate_by_segment"]]
-        st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch",
-                     column_config={"Analysed": st.column_config.NumberColumn(format="localized"),
-                                    "Flagged": st.column_config.NumberColumn(format="localized"),
-                                    "Flag rate": st.column_config.NumberColumn(format="percent"),
-                                    "One forest for all": st.column_config.NumberColumn(format="percent", help="Share of the group a single population-wide forest would flag with the same total budget")})
-        st.markdown('<div class="chart-note">Same review threshold applied within each group; the last column shows how unevenly one population-wide forest spends the same budget.</div>', unsafe_allow_html=True)
-    with c4, st.container(border=True):
-        st.markdown('<div class="chart-title">Feature contributions</div>', unsafe_allow_html=True)
-        st.altair_chart(shap_contribution_chart(summary["shap_if_top10"]), width="stretch")
-        st.markdown(f'<div class="chart-note">Global SHAP importance across the peer-group forests; the top ten features carry '
-                    f'{summary.get("shap_if_top10_share", 0):.0%} of all attribution.</div>', unsafe_allow_html=True)
-
-    rare = _rule(summary, "claims_item_rare_in_segment")
-    rare3 = _rule(summary, "claims_3plus_rare_items")
-    hgb = next((r for r in summary.get("surrogate_agreement", []) if r["model"].startswith("Hist") and "segmented" in r["reference_flags"]), {})
-    income = next((r for r in summary.get("income_confounding", []) if r["design"] == "segmented"), {})
-    with st.container(border=True):
-        st.markdown('<div class="chart-title">Findings to report</div>', unsafe_allow_html=True)
-        f1, f2, f3 = st.columns(3, gap="medium")
-        f1.markdown(
-            '<div class="finding-card"><span class="no">01</span><div><h4>Unusual profiles</h4>'
-            f'<p>{rare.get("pct_flagged_segmented", 0):.0f}% of flagged returns claim an item rare in their peer group, against '
-            f'{rare.get("pct_unflagged_segmented", 0):.0f}% of unflagged returns; three or more rare items are '
-            f'{rare3.get("lift_segmented", 0):.0f}× more common among flags. Flagged returns have a median income '
-            f'{income.get("income_multiple_of_population_median", 0):.1f}× the population median.</p></div></div>',
-            unsafe_allow_html=True)
-        f2.markdown(
-            '<div class="finding-card"><span class="no">02</span><div><h4>Threshold stability</h4>'
-            f'<p>Re-fitting the forests with five seeds keeps score rankings at Spearman {summary.get("seed_stability_mean_spearman", 0):.2f}; '
-            f'{summary.get("pct_primary_flags_in_all_seeds", 0):.0f}% of flags appear under every seed. Peer-group and '
-            f'population-wide designs share {summary.get("flag_jaccard", 0):.0%} of their {budget:.0%} lists — they are different review sets.</p></div></div>',
-            unsafe_allow_html=True)
-        f3.markdown(
-            '<div class="finding-card"><span class="no">03</span><div><h4>Model explanations</h4>'
-            "<p>Local SHAP sums reproduce each forest's own ranking (ρ = 1.00 in every group). A gradient-boosting surrogate "
-            f'recovers the flag rule with ROC-AUC {hgb.get("roc_auc_vs_reference", 0):.3f} and matches '
-            f'{hgb.get("jaccard", 0):.0%} of the flagged set at the same budget, so the rule is consistent and learnable.</p></div></div>',
-            unsafe_allow_html=True)
-
-    sil = next((r["silhouette"] for r in summary["cluster_selection"] if r["k"] == summary["k_selected"]), 0)
+    n_records = sum(p.get("n_records", 0) for p in service.segment_profiles.values())
     built = datetime.fromtimestamp((Path(service.model_dir) / "model_metadata.json").stat().st_mtime)
-    with st.expander("Methodology, model details & limitations"):
-        m1, m2 = st.columns([1, 1.3], gap="medium")
-        m1.markdown(
-            f"""
-            <div class="ctx">
-              <div class="row"><span>Training data</span><b>{summary['data_source']}</b></div>
-              <div class="row"><span>Records</span><b>{n_records:,}</b></div>
-              <div class="row"><span>Peer groups</span><b>{summary['k_selected']} (K-Means, silhouette {sil:.2f})</b></div>
-              <div class="row"><span>Detector</span><b>Isolation Forest per group, 200 trees</b></div>
-              <div class="row"><span>Features</span><b>{n_features} log-amounts and ratios</b></div>
-              <div class="row"><span>Review budget</span><b>{budget:.0%} per peer group</b></div>
-              <div class="row"><span>Explanations</span><b>SHAP TreeExplainer</b></div>
-              <div class="row"><span>Artifacts built</span><b>{built:%d %B %Y}</b></div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-        m2.markdown(
-            f"""
-            **Pipeline.** {n_records:,} returns from the {summary['data_source']}. {summary.get('n_amount_features_kept', '')} amount
-            variables survive a sparsity screen (non-zero for at least 1% of taxpayers) and a redundancy screen (|r| < 0.95) and are
-            signed-log transformed; {n_ratios} behavioural ratios describe the shape of the return. K-Means on nine
-            income-composition features gives {summary['k_selected']} peer groups (silhouette {sil:.2f}). One Isolation Forest
-            (200 trees) is fitted per group and the top {budget:.0%} of each group is flagged. SHAP TreeExplainer provides
-            global and per-return explanations; a Random Forest and histogram gradient boosting are trained only as
-            surrogates of the flag rule.
-
-            **Label-free evaluation.** No record was modified and no synthetic anomaly labels were used. Evaluation relies on
-            agreement between designs at each budget, flag rates by peer group and income decile, a ratios-only ablation,
-            score stability across five seeds and rule-based sanity checks on flagged rows.
-
-            **Limitations.** The file carries no audit outcomes, so nothing here measures non-compliance. A review budget
-            flags the top {budget:.0%} of every group even if all returns are correct. Scores still correlate with income
-            (ρ = {income.get('spearman_score_vs_income', 0):.2f}) because the amount features carry scale. Results reflect one
-            income year and a 2% sample.
-            """
-        )
-    st.markdown('<div class="chart-note">Anomalies support review; they do not establish non-compliance.</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="title-row"><h1>About the model</h1></div>'
+        f'<div class="subtitle">Peer-group Isolation Forest with SHAP explanations &nbsp;·&nbsp; {metadata.get("data_source", "unknown data source")}</div>',
+        unsafe_allow_html=True,
+    )
+    c1, c2 = st.columns([1.15, 1], gap="medium")
+    c1.markdown(
+        f"""
+        <div class="card ctx">
+          <h3>{tile("settings", "navy")}Fitted pipeline</h3>
+          <div class="row"><span>Training data</span><b>{metadata.get('data_source', 'unknown')}</b></div>
+          <div class="row"><span>Records</span><b>{n_records:,} individual returns, unmodified</b></div>
+          <div class="row"><span>Peer groups</span><b>{len(metadata['segment_names'])} (K-Means on income composition)</b></div>
+          <div class="row"><span>Detector</span><b>Isolation Forest per peer group, 200 trees</b></div>
+          <div class="row"><span>Features</span><b>{len(metadata['anomaly_features'])} log-amounts and behavioural ratios</b></div>
+          <div class="row"><span>Review budget</span><b>{metadata['contamination']:.0%} of each peer group</b></div>
+          <div class="row"><span>Explanations</span><b>SHAP TreeExplainer</b></div>
+          <div class="row"><span>Artifacts built</span><b>{built:%d %B %Y}</b></div>
+        </div>
+        <div class="card">
+          <h3>{tile("info")}How a score is produced</h3>
+          <p>A return is first assigned to the peer group whose income mix it resembles. That group's own Isolation Forest scores how easily the return can be isolated from its peers; the top {metadata['contamination']:.0%} of each group is flagged. SHAP values then attribute the score to the individual items on the return, so every flag comes with named reasons.</p>
+          <p class="small" style="margin:0">Combined form fields are itemised across the return labels the model expects using population-typical proportions; total income, deductions and taxable income are derived automatically.</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    with c2:
+        st.markdown(f'<div class="chart-title" style="display:flex;align-items:center;gap:0.6rem">{tile("users")}Peer groups</div>', unsafe_allow_html=True)
+        rows = []
+        for segment_id, name in metadata["segment_names"].items():
+            profile = service.segment_profiles.get(segment_id, {})
+            rows.append({"Peer group": name, "Records": profile.get("n_records"), "Share": profile.get("share_of_population"),
+                         "Median income": profile.get("median_total_income"), "Threshold": metadata["segment_thresholds"][segment_id]})
+        st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch",
+                     column_config={"Records": st.column_config.NumberColumn(format="localized"),
+                                    "Share": st.column_config.ProgressColumn(format="percent", min_value=0, max_value=1),
+                                    "Median income": st.column_config.NumberColumn(format="$%d"),
+                                    "Threshold": st.column_config.NumberColumn(format="%.4f")})
+        st.markdown('<div class="chart-note">Each group is scored by its own forest against its own review threshold, so a rental investor is judged against rental investors.</div>', unsafe_allow_html=True)
 
 
 if page == "Overview":
