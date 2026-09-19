@@ -1,0 +1,30 @@
+# Confidential ATO sample file must never be committed
+data/
+*.csv
+!tables/*.csv
+
+# Row-level or single-record outputs from the training run
+results/taxpayer_scores.csv
+results/summary.json
+results/run_log.txt
+tables/table_top15_review_list.csv
+tables/table_local_explanations.csv
+figures/fig10_shap_local_waterfalls.png
+figures/fig10?_waterfall.png
+train_console.txt
+streamlit_preview.*
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# OS / editor / tooling
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+.claude/

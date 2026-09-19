@@ -1,0 +1,23 @@
+{
+  "work_related_expenses": {
+    "WRE_car_amt": 0.3558,
+    "WRE_trvl_amt": 0.0887,
+    "WRE_uniform_amt": 0.0791,
+    "WRE_self_amt": 0.0594,
+    "WRE_other_amt": 0.417
+  },
+  "rental_deductions": {
+    "Rent_int_ded_amt": 0.4411,
+    "Other_rent_ded_amt": 0.4748,
+    "Rent_cap_wks_amt": 0.0841
+  },
+  "investment_income": {
+    "Grs_int_amt": 0.2969,
+    "Frk_Div_amt": 0.6667,
+    "Unfranked_Div_amt": 0.0364
+  },
+  "investment_deductions": {
+    "Intrst_Ded_amt": 0.3941,
+    "Div_Ded_amt": 0.6059
+  }
+}

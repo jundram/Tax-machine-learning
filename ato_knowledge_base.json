@@ -1,0 +1,87 @@
+{
+  "work_related_expenses": {
+    "title": "ATO: Work-related expenses",
+    "url": "https://www.ato.gov.au/individuals-and-families/income-deductions-offsets-and-records/deductions-you-can-claim/work-related-expenses",
+    "summary": "Work-related deductions generally need a direct connection to earning employment income, must not have been reimbursed, and require appropriate records. Private portions are not deductible.",
+    "review_questions": [
+      "Is each expense directly connected to the taxpayer's employment duties?",
+      "Was any amount reimbursed by the employer?",
+      "Are receipts, calculations and any required diary or logbook records available?",
+      "Has any private-use portion been excluded?"
+    ]
+  },
+  "rental_expenses": {
+    "title": "ATO: Rental expenses to claim",
+    "url": "https://www.ato.gov.au/individuals-and-families/investments-and-assets/residential-rental-properties/rental-expenses-to-claim",
+    "summary": "Rental costs can have different treatments: some may be immediately deductible, some claimed over several years, and some not deductible. Expenses may need apportionment for private use, partial-year availability, co-ownership or non-commercial rent.",
+    "review_questions": [
+      "Was the property genuinely available for rent for the relevant period?",
+      "Do any costs need to be apportioned for private use or co-ownership?",
+      "Are capital works and depreciating assets treated over the correct period?",
+      "Can the rental interest and other costs be reconciled to supporting records?"
+    ]
+  },
+  "business_expenses": {
+    "title": "ATO: Business deductions",
+    "url": "https://www.ato.gov.au/businesses-and-organisations/income-deductions-and-concessions/deductions",
+    "summary": "A business deduction generally requires a connection to earning assessable business income. Private use must be excluded, and capital or prepaid costs may require a different treatment or timing.",
+    "review_questions": [
+      "How do the expenses relate to the income-producing business activity?",
+      "Have private and domestic amounts been excluded?",
+      "Do any items require depreciation or another capital treatment?",
+      "Are invoices and payment records available?"
+    ]
+  },
+  "investment_deductions": {
+    "title": "ATO: Claiming a deduction for interest",
+    "url": "https://www.ato.gov.au/individuals-and-families/investments-and-assets/investing-in-shares/owning-shares/claiming-a-deduction-for-interest",
+    "summary": "Interest may be deductible where borrowed money is used to acquire income-producing investments. Mixed-purpose borrowing generally requires apportionment, and the use of the borrowed funds is important.",
+    "review_questions": [
+      "Can the use of the borrowed funds be traced to income-producing investments?",
+      "Does any private or mixed use require apportionment?",
+      "Is corresponding investment income reported?",
+      "Are loan statements and interest calculations available?"
+    ]
+  },
+  "gifts_and_donations": {
+    "title": "ATO: Gifts and donations",
+    "url": "https://www.ato.gov.au/individuals-and-families/income-deductions-offsets-and-records/deductions-you-can-claim/gifts-and-donations",
+    "summary": "A deductible gift generally must be made to a deductible gift recipient and satisfy the relevant gift conditions. Receipts and evidence of the recipient's status should be retained.",
+    "review_questions": [
+      "Was the recipient endorsed as a deductible gift recipient?",
+      "Was the payment a genuine gift rather than a purchase or benefit received?",
+      "Is a receipt or other supporting evidence available?"
+    ]
+  },
+  "tax_affairs": {
+    "title": "ATO: Cost of managing tax affairs",
+    "url": "https://www.ato.gov.au/individuals-and-families/income-deductions-offsets-and-records/deductions-you-can-claim/cost-of-managing-tax-affairs",
+    "summary": "Certain costs incurred in managing tax affairs may be deductible. The nature, timing and supporting invoice for each cost should be checked.",
+    "review_questions": [
+      "What service does each fee relate to?",
+      "Was the amount incurred by this taxpayer in the relevant period?",
+      "Is the invoice or payment record available?"
+    ]
+  },
+  "personal_super": {
+    "title": "ATO: Personal super contributions",
+    "url": "https://www.ato.gov.au/individuals-and-families/super-for-individuals-and-families/super/growing-and-keeping-track-of-your-super/how-to-save-more-in-your-super/personal-super-contributions",
+    "summary": "Eligibility to deduct personal super contributions depends on applicable requirements, including giving the fund a valid notice of intent and receiving its acknowledgment before claiming.",
+    "review_questions": [
+      "Was the contribution made to a complying super fund?",
+      "Was a valid notice of intent provided within the required timeframe?",
+      "Did the fund acknowledge the notice before the deduction was claimed?",
+      "Is the claimed amount consistent with contribution records?"
+    ]
+  },
+  "general_records": {
+    "title": "ATO: Records you need to keep",
+    "url": "https://www.ato.gov.au/individuals-and-families/income-deductions-offsets-and-records/records-you-need-to-keep",
+    "summary": "Taxpayers should keep records supporting the income and deductions reported in their return. Records should explain the transaction and allow amounts and calculations to be checked.",
+    "review_questions": [
+      "Can reported amounts be reconciled to source documents?",
+      "Are calculation methods and apportionments documented?",
+      "Are records complete for unusually large or uncommon items?"
+    ]
+  }
+}
